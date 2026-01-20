@@ -15,12 +15,15 @@ let dialogueHistory: Array<{ speaker: string; text: string }> = [];
 let isAutoMode = false;
 let autoModeTimeout: number | null = null;
 let isUIVisible = true;
+let isShowingFrames = false; // Флаг для предотвращения параллельных вызовов showNextFrame
+let frameShowTimeout: number | null = null; // Таймер для показа следующего фрейма
 let badChoicesCount = 0; // Счётчик последовательных плохих выборов
 let lastMoodLevel = 50; // Последний уровень настроения
 let totalVovaReplies = 0; // Общее количество реплик Вовы (для расчёта прогресса)
 let visitedLocations: string[] = []; // Отслеживание посещенных локаций (для контроля актов)
 let currentLocation: string = 'entrance'; // Текущая локация (для проверки соответствия событий)
 let previousNote: string | null = null; // Заметка от предыдущего вызова Gemini (для связи между запросами)
+let previousEvaluation: { mood_adjustment?: number; next_note_hint?: string; suggestions?: string } | null = null; // Оценка от evaluateDialogue
 let vovaAskLeaveRefusalCount = 0; // Сколько раз Вова просил уйти, а игрок отказался (после 2 — принудительный FINAL)
 let discussedTopics: string[] = []; // Темы, которые уже обсуждались (для запрета повторов)
 let vovaIQ: number = 100; // IQ Вовы в текущей сессии (роллится в начале игры, 60-140)
@@ -193,6 +196,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (autoModeTimeout) {
             clearTimeout(autoModeTimeout);
+        }
+        if (frameShowTimeout) {
+            clearTimeout(frameShowTimeout);
         }
         
         // Очищаем кэш (локально, без удаления на сервере - нет времени)
@@ -464,7 +470,8 @@ async function startGameWithData(uploadedFile: any) {
             [], // discussedTopics - в START ещё нет обсуждённых тем
             vovaIQ, // IQ Вовы в этой сессии (60-140)
             vovaBaseMood, // Базовое настроение дня
-            0 // vovaAskLeaveRefusalCount - в START счётчик 0
+            0, // vovaAskLeaveRefusalCount - в START счётчик 0
+            null // previousEvaluation - в START ещё нет оценки
         );
         coreSummary = currentStoryData.session_info.core_summary;
         currentStage = currentStoryData.session_info.stage;
@@ -533,16 +540,31 @@ function hideCharacter() {
     }, 500);
 }
 
-// === ПОКАЗ ФРЕЙМА ===
+// === ПОКАЗ ФРЕЙМА (ИТЕРАТИВНЫЙ ПОДХОД) ===
 function showNextFrame() {
+    // Защита от параллельных вызовов
+    if (isShowingFrames) {
+        console.log('⚠️ showNextFrame уже выполняется, игнорируем повторный вызов');
+        return;
+    }
+    
     // Защита от вызова без инициализации
     if (!currentStoryData || !currentFrames || currentFrames.length === 0) {
         console.error('showNextFrame вызван без инициализации данных');
         return;
     }
     
+    // Защита от бесконечного цикла (максимум 100 фреймов за раз)
+    if (currentFrameIndex >= currentFrames.length + 100) {
+        console.error('⚠️ Превышен лимит фреймов, принудительная остановка');
+        isShowingFrames = false;
+        handleEarlyEnd('kicked_out');
+        return;
+    }
+    
     // ЖЁСТКОЕ ЗАВЕРШЕНИЕ: если force_end или FINAL с низким mood - завершаем сразу
     if (currentStoryData.force_end === true || (currentStage === 'FINAL' && currentFrameIndex >= currentFrames.length - 1 && (currentStoryData.session_info?.mood_level ?? 0) < 20)) {
+        isShowingFrames = false;
         handleEarlyEnd(currentStoryData.end_reason || 'kicked_out');
         return;
     }
@@ -550,6 +572,7 @@ function showNextFrame() {
     if (currentFrameIndex >= currentFrames.length) {
         // Если stage = FINAL и фреймы закончились - завершаем историю
         const isFinal = currentStage === 'FINAL';
+        isShowingFrames = false;
         if (isFinal) {
             showEndScreen();
             return;
@@ -571,6 +594,8 @@ function showNextFrame() {
         return;
     }
     
+    isShowingFrames = true;
+    
     const frame = currentFrames[currentFrameIndex];
     
     // Обновляем персонажа (поза из session_info, не из frame.emotion)
@@ -581,6 +606,13 @@ function showNextFrame() {
     
     // Показываем диалог
     dialogueBox.classList.remove('hidden');
+    
+    // Сохраняем текущие данные для использования в колбэках
+    const storyData = currentStoryData;
+    const frames = currentFrames;
+    const frameIndex = currentFrameIndex;
+    
+    // Показываем текст с анимацией
     animateText(frame.text, 'Вова');
     
     // Добавляем в историю
@@ -594,14 +626,8 @@ function showNextFrame() {
     
     currentFrameIndex++;
     
-    // Проверяем, нужно ли показать выборы после этого фрейма (в середине диалога)
-    if (frame.show_choices_after === true && currentStoryData?.choices && currentStoryData.choices.length > 0) {
-        // Показываем выборы в середине диалога
-        // Ждём завершения анимации текста, затем показываем выборы
-        setTimeout(() => {
-            showChoices();
-        }, 500);
-    }
+    // Проверка на show_choices_after и продолжение показа фреймов
+    // происходит в animateText после завершения анимации текста
 }
 
 // === АНИМАЦИЯ ТЕКСТА ===
@@ -611,6 +637,11 @@ function animateText(text: string, speaker: string) {
     
     let charIndex = 0;
     const speed = 100 - settings.textSpeed; // Инверсия для удобства (больше = быстрее)
+    
+    // Сохраняем текущие данные для использования в колбэках
+    const storyData = currentStoryData;
+    const frames = currentFrames;
+    const frameIndex = currentFrameIndex - 1; // Текущий фрейм (уже увеличен в showNextFrame)
     
     if (textAnimationInterval) {
         clearInterval(textAnimationInterval);
@@ -627,12 +658,31 @@ function animateText(text: string, speaker: string) {
             }
             isTextAnimating = false;
             
+            // Сбрасываем флаг показа фреймов после завершения анимации
+            isShowingFrames = false;
+            
+            // Проверяем, нужно ли показать выборы после этого фрейма
+            if (storyData && frames && frameIndex >= 0 && frameIndex < frames.length) {
+                const frame = frames[frameIndex];
+                if (frame.show_choices_after === true && storyData.choices && storyData.choices.length > 0) {
+                    // Показываем выборы в середине диалога
+                    setTimeout(() => {
+                        showChoices();
+                    }, 500);
+                    return;
+                }
+            }
+            
             // Если авто-режим включен, продолжаем автоматически
-            if (isAutoMode && currentStoryData && currentFrames && currentFrames.length > 0) {
-                const storyData = currentStoryData; // Сохраняем ссылку
-                const frames = currentFrames; // Сохраняем ссылку
+            if (isAutoMode && storyData && frames && frames.length > 0) {
+                // Очищаем предыдущий таймер, если он есть
+                if (autoModeTimeout) {
+                    clearTimeout(autoModeTimeout);
+                }
                 autoModeTimeout = window.setTimeout(() => {
                     if (!storyData || !frames) return;
+                    // Проверяем, что данные не изменились
+                    if (currentStoryData !== storyData || currentFrames !== frames) return;
                     if (currentFrameIndex < frames.length) {
                         showNextFrame();
                     } else if (storyData.choices && storyData.choices.length > 0) {
@@ -675,6 +725,11 @@ function handleClick(event: MouseEvent) {
         return;
     }
     
+    // Если фреймы уже показываются - игнорируем клик
+    if (isShowingFrames) {
+        return;
+    }
+    
     // Если текст анимируется - мгновенно показываем весь
     if (isTextAnimating) {
         if (textAnimationInterval) {
@@ -684,6 +739,7 @@ function handleClick(event: MouseEvent) {
         const frame = currentFrames[currentFrameIndex - 1];
         dialogueText.textContent = frame.text;
         isTextAnimating = false;
+        isShowingFrames = false; // Сбрасываем флаг после завершения анимации
         return;
     }
     
@@ -693,6 +749,15 @@ function handleClick(event: MouseEvent) {
 
 // === ПОКАЗ ВЫБОРОВ ===
 function showChoices() {
+    // Сбрасываем флаг показа фреймов при показе выборов
+    isShowingFrames = false;
+    
+    // Останавливаем таймеры показа фреймов
+    if (frameShowTimeout) {
+        clearTimeout(frameShowTimeout);
+        frameShowTimeout = null;
+    }
+    
     // Защита от вызова без инициализации
     if (!currentStoryData) {
         console.error('showChoices вызван без инициализации данных');
@@ -788,6 +853,24 @@ async function handleChoice(choice: Choice) {
     
     isProcessingChoice = true;
     
+    // Останавливаем все таймеры перед новым запросом
+    if (textAnimationInterval) {
+        clearInterval(textAnimationInterval);
+        textAnimationInterval = null;
+    }
+    if (autoModeTimeout) {
+        clearTimeout(autoModeTimeout);
+        autoModeTimeout = null;
+    }
+    if (frameShowTimeout) {
+        clearTimeout(frameShowTimeout);
+        frameShowTimeout = null;
+    }
+    
+    // Сбрасываем флаги
+    isShowingFrames = false;
+    isTextAnimating = false;
+    
     // Сразу скрываем выборы (без задержки)
     choicesContainer.classList.add('hidden');
     choicesContainer.style.opacity = '0';
@@ -859,7 +942,8 @@ async function handleChoice(choice: Choice) {
             discussedTopics, // Запрещаем повторять уже обсуждённое
             vovaIQ, // IQ Вовы в этой сессии (60-140)
             vovaBaseMood, // Базовое настроение дня
-            vovaAskLeaveRefusalCount // После 2+ отказов уйти — принудительное выпроваживание
+            vovaAskLeaveRefusalCount, // После 2+ отказов уйти — принудительное выпроваживание
+            previousEvaluation // Передаём оценку от предыдущего вызова evaluateDialogue
         );
         
         // Обновляем список тем с учётом новых фреймов (чтобы следующий ход ещё меньше зацикливался)
@@ -867,6 +951,9 @@ async function handleChoice(choice: Choice) {
         
         // Сохраняем заметку для следующего вызова
         previousNote = currentStoryData.next_note || null;
+        
+        // Очищаем оценку после использования (новая будет получена от evaluateDialogue)
+        previousEvaluation = null;
         
         // Добавляем выбор игрока в историю (после генерации)
         dialogueHistory.push({
@@ -1426,6 +1513,7 @@ async function cleanupGameState() {
     visitedLocations = [];
     currentLocation = 'entrance'; // Сбрасываем текущую локацию
     previousNote = null; // Сбрасываем заметку
+    previousEvaluation = null; // Сбрасываем оценку
     discussedTopics = [];
     vovaIQ = 100; // Сбрасываем IQ (будет перезаписан при следующем старте)
     vovaBaseMood = 'chill'; // Сбрасываем базовое настроение (будет перезаписано при следующем старте)
@@ -1439,6 +1527,13 @@ async function cleanupGameState() {
         clearTimeout(autoModeTimeout);
         autoModeTimeout = null;
     }
+    if (frameShowTimeout) {
+        clearTimeout(frameShowTimeout);
+        frameShowTimeout = null;
+    }
+    
+    // Сбрасываем флаги
+    isShowingFrames = false;
     
     // Очищаем кэш Gemini API (асинхронно, удаляем на сервере)
     if (geminiAPI) {
