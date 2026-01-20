@@ -498,9 +498,14 @@ async function startGameWithData(uploadedFile: any) {
         // Показываем персонажа
         showCharacter();
         
-        // Показываем первый фрейм
+        // Показываем первый фрейм (проверяем, что данные инициализированы)
         setTimeout(() => {
-            showNextFrame();
+            if (currentStoryData && currentFrames && currentFrames.length > 0) {
+                showNextFrame();
+            } else {
+                console.error('Ошибка: данные не инициализированы перед показом фрейма');
+                alert('Ошибка загрузки: данные не инициализированы');
+            }
         }, 500);
         
     } catch (error) {
@@ -530,9 +535,15 @@ function hideCharacter() {
 
 // === ПОКАЗ ФРЕЙМА ===
 function showNextFrame() {
+    // Защита от вызова без инициализации
+    if (!currentStoryData || !currentFrames || currentFrames.length === 0) {
+        console.error('showNextFrame вызван без инициализации данных');
+        return;
+    }
+    
     // ЖЁСТКОЕ ЗАВЕРШЕНИЕ: если force_end или FINAL с низким mood - завершаем сразу
-    if (currentStoryData?.force_end === true || (currentStage === 'FINAL' && currentFrameIndex >= currentFrames.length - 1 && (currentStoryData?.session_info?.mood_level ?? 0) < 20)) {
-        handleEarlyEnd(currentStoryData?.end_reason || 'kicked_out');
+    if (currentStoryData.force_end === true || (currentStage === 'FINAL' && currentFrameIndex >= currentFrames.length - 1 && (currentStoryData.session_info?.mood_level ?? 0) < 20)) {
+        handleEarlyEnd(currentStoryData.end_reason || 'kicked_out');
         return;
     }
     
@@ -617,9 +628,16 @@ function animateText(text: string, speaker: string) {
             isTextAnimating = false;
             
             // Если авто-режим включен, продолжаем автоматически
-            if (isAutoMode) {
+            if (isAutoMode && currentStoryData && currentFrames && currentFrames.length > 0) {
+                const storyData = currentStoryData; // Сохраняем ссылку
+                const frames = currentFrames; // Сохраняем ссылку
                 autoModeTimeout = window.setTimeout(() => {
-                    handleClick(new MouseEvent('click'));
+                    if (!storyData || !frames) return;
+                    if (currentFrameIndex < frames.length) {
+                        showNextFrame();
+                    } else if (storyData.choices && storyData.choices.length > 0) {
+                        showChoices();
+                    }
                 }, 2000);
             }
         }
@@ -675,13 +693,19 @@ function handleClick(event: MouseEvent) {
 
 // === ПОКАЗ ВЫБОРОВ ===
 function showChoices() {
-    // ЖЁСТКОЕ ЗАВЕРШЕНИЕ: если force_end, FINAL или очень низкий mood - не показываем выборы, завершаем
-    if (currentStoryData?.force_end === true || currentStage === 'FINAL' || (currentStoryData?.session_info?.mood_level ?? 0) < 20) {
-        handleEarlyEnd(currentStoryData?.end_reason || 'kicked_out');
+    // Защита от вызова без инициализации
+    if (!currentStoryData) {
+        console.error('showChoices вызван без инициализации данных');
         return;
     }
     
-    if (!currentStoryData?.choices || currentStoryData.choices.length === 0) {
+    // ЖЁСТКОЕ ЗАВЕРШЕНИЕ: если force_end, FINAL или очень низкий mood - не показываем выборы, завершаем
+    if (currentStoryData.force_end === true || currentStage === 'FINAL' || (currentStoryData.session_info?.mood_level ?? 0) < 20) {
+        handleEarlyEnd(currentStoryData.end_reason || 'kicked_out');
+        return;
+    }
+    
+    if (!currentStoryData.choices || currentStoryData.choices.length === 0) {
         // Конец игры
         showEndScreen();
         return;
@@ -1317,9 +1341,17 @@ function toggleAutoMode() {
         if (isAutoMode) {
             autoButton.classList.add('active');
             // Продолжаем автоматически, если текст уже показан
-            if (!isTextAnimating && currentFrameIndex < currentFrames.length) {
+            if (!isTextAnimating && currentStoryData && currentFrames && currentFrameIndex < currentFrames.length) {
+                const storyData = currentStoryData; // Сохраняем ссылку
+                const frames = currentFrames; // Сохраняем ссылку
                 autoModeTimeout = window.setTimeout(() => {
-                    handleClick(new MouseEvent('click'));
+                    // Используем прямой вызов вместо handleClick, чтобы избежать рекурсии
+                    if (!storyData || !frames) return;
+                    if (currentFrameIndex < frames.length) {
+                        showNextFrame();
+                    } else if (storyData.choices && storyData.choices.length > 0) {
+                        showChoices();
+                    }
                 }, 2000);
             }
         } else {
