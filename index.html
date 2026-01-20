@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Novel</title>
+    <link rel="icon" type="image/png" href="/assets/characters/lena_browser.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Фон -->
+    <div id="background" class="background"></div>
+    
+    <!-- Персонаж -->
+    <div id="character" class="character hidden">
+        <img id="characterSprite" src="" alt="Вова">
+        <div id="questionIcon" class="question-icon hidden">?</div>
+    </div>
+    
+    <!-- Диалоговое окно -->
+    <div id="dialogue-box" class="dialogue-box hidden">
+        <div class="speaker-name">
+            <span class="speaker-icon">⭐</span>
+            Вова
+        </div>
+        <div id="dialogue-text" class="dialogue-text"></div>
+        <div class="continue-indicator">▼</div>
+    </div>
+    
+    <!-- Кнопки выбора -->
+    <div id="choices-container" class="choices-container hidden"></div>
+    
+    <!-- Кнопки управления игрой -->
+    <div id="game-controls" class="game-controls hidden">
+        <button id="auto-button" class="control-button" title="Автоматическое проигрывание">Auto</button>
+        <button id="log-button" class="control-button" title="История диалогов">Log</button>
+        <button id="hide-button" class="control-button" title="Скрыть интерфейс">Hide</button>
+    </div>
+    
+    <!-- Системные иконки -->
+    <div id="system-icons" class="system-icons hidden">
+        <button id="settings-icon" class="system-icon" title="Настройки">⚙️</button>
+        <button id="reset-icon" class="system-icon" title="Очистить сессию">🔄</button>
+        <button id="exit-icon" class="system-icon" title="Выход">✕</button>
+    </div>
+    
+    <!-- Стартовый экран / Главное меню -->
+    <div id="start-screen" class="start-screen">
+        <div class="menu-title">
+            <h1 class="title-paper">Paper</h1>
+            <h1 class="title-galgame">Galgame</h1>
+            <p class="subtitle">オトメ・ドメイン</p>
+        </div>
+        <div class="menu-character">
+            <img id="menu-character-img" src="" alt="Вова">
+        </div>
+        <div class="menu-buttons">
+            <button id="start-menu-button" class="menu-button menu-button-active">
+                <span class="button-label">Старт</span>
+                <span class="button-subtitle">НАЧАТЬ ИГРУ</span>
+            </button>
+            <button id="partner-menu-button" class="menu-button">
+                <span class="button-label">Кто вы?</span>
+                <span class="button-subtitle">В разработке</span>
+            </button>
+            <button id="settings-menu-button" class="menu-button">
+                <span class="button-label">Настройки</span>
+                <span class="button-subtitle">КОНФИГ</span>
+            </button>
+        </div>
+        <div id="file-upload-section" class="file-upload-section hidden">
+            <div class="file-upload-container">
+                <p class="file-upload-title">Как начать разговор с Вовой?</p>
+                
+                <!-- Две кнопки: Текст и Просто прийти в гости -->
+                <div class="start-mode-buttons">
+                    <button id="mode-text" class="mode-button">
+                        <span class="mode-icon">✏️</span>
+                        <span class="mode-label">Текст</span>
+                        <span class="mode-subtitle">Обсудить что-то конкретное</span>
+                    </button>
+                    <button id="mode-visit" class="mode-button">
+                        <span class="mode-icon">🚪</span>
+                        <span class="mode-label">Просто прийти в гости</span>
+                        <span class="mode-subtitle">Начать диалог без темы</span>
+                    </button>
+                </div>
+                
+                <!-- Вставка текста (показывается только при выборе "Текст") -->
+                <div id="text-input-mode" class="input-mode hidden">
+                    <textarea 
+                        id="text-input" 
+                        class="text-input" 
+                        placeholder="Вставьте или введите текст, который хотите обсудить с Вовой..."
+                        rows="10"
+                    ></textarea>
+                    <div class="text-input-info">
+                        <span id="text-char-count">0 символов</span>
+                    </div>
+                    <div class="file-actions">
+                        <button id="cancel-button" class="cancel-button">Отменить</button>
+                        <button id="start-text-button" class="start-button">Начать разговор</button>
+                    </div>
+                </div>
+                
+                <!-- Кнопка "Начать визит" (показывается только при выборе "Просто прийти в гости") -->
+                <div id="visit-actions" class="file-actions hidden">
+                    <button id="cancel-visit-button" class="cancel-button">Отменить</button>
+                    <button id="start-visit-button" class="start-button">Прийти в гости</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Панель настроек -->
+    <div id="settings-panel" class="settings-panel hidden">
+        <h3>Настройки</h3>
+        
+        <label>Скорость текста:</label>
+        <input type="range" id="text-speed" min="10" max="100" value="50">
+        <span id="speed-value">50</span>
+        
+        <label>Громкость музыки:</label>
+        <input type="range" id="music-volume" min="0" max="100" value="70">
+        <span id="volume-value">70</span>
+        
+        <label>Музыкальная тема:</label>
+        <select id="music-select">
+            <option value="main_music_1">Музыка 1</option>
+            <option value="main_music_2">Музыка 2</option>
+        </select>
+        
+        <button onclick="toggleSettings()">Закрыть</button>
+    </div>
+    
+    <!-- Панель истории диалогов -->
+    <div id="log-panel" class="log-panel hidden">
+        <h3>История диалогов</h3>
+        <div id="log-content" class="log-content"></div>
+        <button id="close-log" class="close-log-button">Закрыть</button>
+    </div>
+    
+    <!-- Индикатор загрузки -->
+    <div id="loading" class="loading hidden">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <h3 class="loading-title">Вова думает...</h3>
+            <p class="loading-subtitle" id="loading-status">Короче, дай секунду...</p>
+            <div class="loading-progress">
+                <div class="loading-progress-bar" id="loading-progress-bar"></div>
+            </div>
+        </div>
+    </div>
+    
+    <audio id="background-music" loop></audio>
+    
+    <script type="module" src="/src/script.ts"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ai-visual-novel
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false  # Установите вручную в панели Render Dashboard -> Environment Variables
+      - key: PORT
+        value: 10000
+    healthCheckPath: /health
